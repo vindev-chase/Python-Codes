@@ -16,7 +16,7 @@ service_account_info = st.secrets["google_sheets"]
 creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 client = gspread.authorize(creds)
 
-SPREADSHEET_NAME = "Student Monitoring Database"  # replace with actual
+SPREADSHEET_NAME = "Student Monitoring Database"  # replace with your actual spreadsheet name
 spreadsheet = client.open(SPREADSHEET_NAME)
 
 # ---------- HELPERS ----------
@@ -42,7 +42,6 @@ def normalize_enrolled(val):
 
 def generate_student_id(existing_df: pd.DataFrame, enrollment_year: int, program_code: str = "R") -> str:
     prefix = f"{enrollment_year}{program_code}"
-    # Filter existing IDs with same year+program
     existing_ids = existing_df["student_id"].astype(str).fillna("")
     tails = []
     for sid in existing_ids:
@@ -56,6 +55,9 @@ def generate_student_id(existing_df: pd.DataFrame, enrollment_year: int, program
         next_num = 10001
     return f"{prefix}{next_num}"
 
+def section_enrollment_count(section_code: str, df_students: pd.DataFrame) -> int:
+    return df_students[df_students["section_code"] == section_code]["student_id"].nunique()
+
 def student_has_section(student_id, section_code, df_students):
     return not df_students[
         (df_students["student_id"].astype(str) == str(student_id))
@@ -68,7 +70,7 @@ section_df = load_sheet_df("Section")
 subjects_df = load_sheet_df("Subjects")
 applications_df = load_sheet_df("Students Registration")
 
-# Normalize status checkbox
+# Normalize status/checkbox
 applications_df["enrolled_flag"] = applications_df.get("status", "").apply(normalize_enrolled)
 
 # ---------- UI TABS ----------
@@ -79,9 +81,11 @@ tab1, tab2, tab3 = st.tabs(
 # ---------- TAB 1: Student Applications ----------
 with tab1:
     st.header("Student Application List")
-    st.markdown("Pending applications (unchecked) appear below. Select subject+section, then click Enroll to assign and generate student ID.")
+    st.markdown(
+        "Pending applications appear below. Select subject and section (capacity shown), then click Enroll. "
+        "Max per section is **6**. Age and preferred starting bracket are included."
+    )
 
-    # Filter pending and non-empty application rows
     pending_apps = applications_df[
         (~applications_df["enrolled_flag"])
         & applications_df["first_name"].astype(str).str.strip().astype(bool)
@@ -103,11 +107,12 @@ with tab1:
             emergency_contact_person = app.get("emergency_contact_person", "")
             emergency_contact_number = app.get("emergency_contact_number", "")
             emergency_contact_relationship = app.get("emergency_contact_relationship", "")
+            preferred_bracket = app.get("preferred_starting_bracket", "")
 
             with st.expander(f"{student_type} — {first_name} {last_name}", expanded=False):
-                cols = st.columns([1.5, 1.5, 2, 2, 2, 1.5])
+                cols = st.columns([1.2, 1.2, 1.5, 1.5, 2, 2, 1.5])
                 with cols[0]:
-                    st.markdown("**Student Type**")
+                    st.markdown("**Type**")
                     st.write(student_type)
                 with cols[1]:
                     st.markdown("**First Name**")
@@ -116,14 +121,20 @@ with tab1:
                     st.markdown("**Last Name**")
                     st.write(last_name)
                 with cols[3]:
+                    st.markdown("**Age**")
+                    st.write(student_age)
+                with cols[4]:
+                    st.markdown("**Preferred Starting Bracket**")
+                    st.write(preferred_bracket)
+                with cols[5]:
                     st.markdown("**Subject**")
                     subject_choice = st.selectbox(
                         "Select subject",
                         options=[""] + subjects_df["subject_title"].dropna().unique().tolist(),
                         key=f"subject_select_{orig_idx}"
                     )
-                with cols[4]:
-                    st.markdown("**Section**")
+                with cols[6]:
+                    st.markdown("**Section (capacity)**")
                     subject_id = ""
                     if subject_choice:
                         matched = subjects_df[subjects_df["subject_title"] == subject_choice]
@@ -139,57 +150,65 @@ with tab1:
                         options=[""] + section_options if section_options else [""],
                         key=f"section_select_{orig_idx}"
                     )
-                with cols[5]:
-                    st.markdown("**Enroll**")
-                    enroll_clicked = st.button("Enroll", key=f"enroll_btn_{orig_idx}")
 
+                # Show capacity info if a section is picked
+                if section_choice:
+                    count = section_enrollment_count(section_choice, students_df)
+                    st.markdown(f"**Section {section_choice}: {count}/6 enrolled**")
+                    if count >= 6:
+                        st.error(f"Section {section_choice} is full. Cannot enroll more.")
+
+                enroll_clicked = st.button("Enroll", key=f"enroll_btn_{orig_idx}")
                 if enroll_clicked:
                     if not subject_choice or not section_choice:
                         st.warning("Both subject and section must be selected.")
-                    else:
-                        # Generate student_id
-                        now = datetime.now()
-                        year = now.year
-                        new_student_id = generate_student_id(students_df, year, program_code="R")
+                        continue
+                    current_count = section_enrollment_count(section_choice, students_df)
+                    if current_count >= 6:
+                        st.error(f"Cannot enroll: section {section_choice} already has 6 students.")
+                        continue
 
-                        # Prevent duplicate section assignment if somehow exists
-                        if student_has_section(new_student_id, section_choice, students_df):
-                            st.error(f"Student {new_student_id} already has section '{section_choice}'.")
-                        else:
-                            # Copy fields into Students sheet (create new student)
-                            student_row = {
-                                "student_id": new_student_id,
-                                "first_name": first_name,
-                                "last_name": last_name,
-                                "student_nickname": student_nickname,
-                                "student_contact": student_contact,
-                                "student_birthday": student_birthday,
-                                "student_age": student_age,
-                                "emergency_contact_person": emergency_contact_person,
-                                "emergency_contact_number": emergency_contact_number,
-                                "emergency_contact_relationship": emergency_contact_relationship,
-                                "section_code": section_choice,
-                                "subject_id": subject_id,
-                                "subject_title": subject_choice,
-                                "date_enrolled": now.strftime("%Y-%m-%d"),
-                            }
-                            # Append
-                            students_df.loc[len(students_df)] = student_row
+                    # Generate student ID
+                    now = datetime.now()
+                    year = now.year
+                    new_student_id = generate_student_id(students_df, year, program_code="R")
 
-                            # Update application record with assigned student_id and mark enrolled
-                            applications_df.at[orig_idx, "student_id"] = new_student_id
-                            applications_df.at[orig_idx, "subject_title"] = subject_choice
-                            applications_df.at[orig_idx, "subject_id"] = subject_id
-                            applications_df.at[orig_idx, "section_code"] = section_choice
-                            applications_df.at[orig_idx, "date_enrolled"] = now.strftime("%Y-%m-%d")
-                            applications_df.at[orig_idx, "status"] = True  # check the box
-                            applications_df.at[orig_idx, "enrolled_flag"] = True
+                    # Build new student record (copy fields)
+                    student_row = {
+                        "student_id": new_student_id,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "student_nickname": student_nickname,
+                        "student_contact": student_contact,
+                        "student_birthday": student_birthday,
+                        "student_age": student_age,
+                        "emergency_contact_person": emergency_contact_person,
+                        "emergency_contact_number": emergency_contact_number,
+                        "emergency_contact_relationship": emergency_contact_relationship,
+                        "preferred_starting_bracket": preferred_bracket,
+                        "section_code": section_choice,
+                        "subject_id": subject_id,
+                        "subject_title": subject_choice,
+                        "date_enrolled": now.strftime("%Y-%m-%d"),
+                    }
 
-                            # Persist changes
-                            push_df_to_sheet(applications_df, "Students Registration")
-                            push_df_to_sheet(students_df, "Students")
+                    # Append student
+                    students_df.loc[len(students_df)] = student_row
 
-                            st.success(f"Enrolled {first_name} {last_name} as {new_student_id} in '{subject_choice}' / '{section_choice}'.")
+                    # Update application row
+                    applications_df.at[orig_idx, "student_id"] = new_student_id
+                    applications_df.at[orig_idx, "subject_title"] = subject_choice
+                    applications_df.at[orig_idx, "subject_id"] = subject_id
+                    applications_df.at[orig_idx, "section_code"] = section_choice
+                    applications_df.at[orig_idx, "date_enrolled"] = now.strftime("%Y-%m-%d")
+                    applications_df.at[orig_idx, "status"] = True
+                    applications_df.at[orig_idx, "enrolled_flag"] = True
+
+                    # Persist changes
+                    push_df_to_sheet(applications_df, "Students Registration")
+                    push_df_to_sheet(students_df, "Students")
+
+                    st.success(f"Enrolled {first_name} {last_name} as {new_student_id} into section '{section_choice}'.")
 
 # ---------- TAB 2: Enrolled Students ----------
 with tab2:
@@ -199,7 +218,7 @@ with tab2:
         students_df["section_code"].astype(str).str.strip() != ""
     ].copy()
 
-    # Ensure subject_title filled (fallback from subjects sheet)
+    # Ensure subject_title is filled if missing
     if "subject_title" in enrolled_students.columns:
         missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
         if missing_mask.any():
@@ -228,7 +247,6 @@ with tab2:
 with tab3:
     st.header("Section List Overview")
 
-    # Enrollment counts from Students sheet
     section_summary = (
         students_df[students_df["section_code"].astype(str).str.strip() != ""]
         .groupby("section_code", dropna=False)
@@ -236,7 +254,6 @@ with tab3:
         .reset_index()
     )
 
-    # Add section metadata
     def get_section_meta(code, field):
         row = section_df[section_df["section_code"] == code]
         return row[field].iloc[0] if not row.empty and field in row.columns else ""
@@ -266,7 +283,6 @@ with tab3:
 
         students_in_section = students_df[students_df["section_code"] == selected_section].copy()
         if not students_in_section.empty:
-            # Fill subject_title if missing
             if "subject_title" not in students_in_section.columns or students_in_section["subject_title"].isna().any():
                 title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
                 students_in_section["subject_title"] = students_in_section["subject_id"].map(title_map)
@@ -278,4 +294,4 @@ with tab3:
                 .reset_index(drop=True)
             )
         else:
-            st.info("No students currently enrolled in this section yet.")
+            st.info("No students enrolled in this section yet.")
