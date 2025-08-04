@@ -7,7 +7,7 @@ st.title("Student Subject & Section Viewer")
 
 # 🔐 Authenticate to Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds_dict = dict(st.secrets["google_sheets"])  # secrets section name
+creds_dict = dict(st.secrets["student-monitoring-database"])  # secrets section name
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 
