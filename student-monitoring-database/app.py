@@ -302,7 +302,7 @@ with tab3:
     section_summary["section_day_sched"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_day_sched"))
     section_summary["section_start_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_start_time"))
     section_summary["section_end_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_end_time"))
-    section_summary["batch_id"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "batch_id"))
+    #section_summary["batch_id"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "batch_id"))
 
     st.subheader("Sections and Enrollment Counts")
     st.dataframe(section_summary)
@@ -317,7 +317,7 @@ with tab3:
         meta = section_summary[section_summary["section_code"] == selected_section].iloc[0]
         st.markdown(f"**Section {selected_section}**")
         st.write({
-            "Batch": int(meta.get("batch_id", "")),
+            #"Batch": int(meta.get("batch_id", "")),
             "Schedule": f"{meta.get('section_day_sched','')} {meta.get('section_start_time','')} - {meta.get('section_end_time','')}",
             "Enrolled Students": int(meta.get("enrolled_count", 0))
         })
