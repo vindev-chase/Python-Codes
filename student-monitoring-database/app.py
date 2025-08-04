@@ -4,7 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-# ---------- AUTH & SETUP ----------
+# ---------- CONFIG / AUTH ----------
 st.set_page_config(page_title="Enrollment Dashboard", layout="wide")
 
 SCOPES = [
@@ -12,27 +12,27 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-# Load credentials from Streamlit secrets
+# Load service account credentials from Streamlit secrets
 service_account_info = st.secrets["google_sheets"]
 creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 client = gspread.authorize(creds)
 
-# Replace with your spreadsheet name or use open_by_key(...)
+# Spreadsheet (replace name if different or use open_by_key)
 SPREADSHEET_NAME = "Student Monitoring Database"
 spreadsheet = client.open(SPREADSHEET_NAME)
 
-# ---------- LOAD / CLEAN DATA ----------
-def load_sheet_df(name):
-    df = pd.DataFrame(spreadsheet.worksheet(name).get_all_records())
+# ---------- UTILITIES ----------
+def load_sheet_df(sheet_name: str) -> pd.DataFrame:
+    df = pd.DataFrame(spreadsheet.worksheet(sheet_name).get_all_records())
     df.columns = df.columns.str.strip().str.lower()
     return df
 
-students_df = load_sheet_df("Students")
-section_df = load_sheet_df("Section")
-subjects_df = load_sheet_df("Subjects")
-applications_df = load_sheet_df("Students Registration")  # contains status checkbox in column q
+def push_df_to_sheet(df: pd.DataFrame, sheet_name: str):
+    ws = spreadsheet.worksheet(sheet_name)
+    ws.clear()
+    data = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
+    ws.update(data)
 
-# Normalize status (checkbox) into boolean enrolled_flag
 def normalize_enrolled(val):
     if isinstance(val, bool):
         return val
@@ -42,26 +42,22 @@ def normalize_enrolled(val):
         return False
     return False
 
+def student_has_section(student_id, section_code, df_students):
+    return not df_students[
+        (df_students["student_id"].astype(str) == str(student_id))
+        & (df_students["section_code"] == section_code)
+    ].empty
+
+# ---------- LOAD DATA ----------
+students_df = load_sheet_df("Students")
+section_df = load_sheet_df("Section")
+subjects_df = load_sheet_df("Subjects")
+applications_df = load_sheet_df("Students Registration")  # contains status checkbox in column Q (lowercased to "status" after load)
+
+# Normalize status/checkbox in applications
 applications_df["enrolled_flag"] = applications_df.get("status", "").apply(normalize_enrolled)
 
-# ---------- HELPERS ----------
-def push_df_to_sheet(df: pd.DataFrame, sheet_name: str):
-    """Overwrite the sheet with the DataFrame (headers + rows)."""
-    ws = spreadsheet.worksheet(sheet_name)
-    # Clear before updating to avoid residuals
-    ws.clear()
-    # Convert all to strings to avoid type issues
-    data = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
-    ws.update(data)
-
-def student_already_enrolled_in_section(student_id, section_code):
-    """Check in section_df if student is already enrolled in that section_code."""
-    mask = (
-        section_df["student_id"].astype(str) == str(student_id)
-    ) & (section_df["section_code"] == section_code)
-    return not section_df[mask].empty
-
-# ---------- UI ----------
+# ---------- TABS ----------
 tab1, tab2, tab3 = st.tabs(
     ["📝 Student Applications", "🎓 Enrolled Students", "📚 Section List"]
 )
@@ -69,26 +65,25 @@ tab1, tab2, tab3 = st.tabs(
 # ---------- TAB 1: Student Applications ----------
 with tab1:
     st.header("Student Application List")
-    st.markdown("Only applications with no checked status are shown. Select subject + section and press Enroll.")
+    st.markdown("Only pending (unchecked) applications are shown. Select subject and section, then click Enroll.")
 
-    # Filter out blank/placeholder rows: require student_id and first_name non-empty
+    # Filter pending apps: exclude ones with enrolled_flag==True and rows missing essential identifiers
     pending_apps = applications_df[
         (~applications_df["enrolled_flag"])
-        #& applications_df["student_id"].astype(str).str.strip().astype(bool)
+        & applications_df["student_id"].astype(str).str.strip().astype(bool)
         & applications_df["first_name"].astype(str).str.strip().astype(bool)
     ].reset_index()
 
     if pending_apps.empty:
-        st.info("No pending applications to enroll.")
+        st.info("No pending applications to process.")
     else:
         for _, app in pending_apps.iterrows():
-            orig_idx = app["index"]  # original row index in applications_df
+            orig_idx = app["index"]  # original index in applications_df
             student_id = app.get("student_id", "")
             first_name = app.get("first_name", "")
             last_name = app.get("last_name", "")
             student_type = app.get("student_type", "")
 
-            # Layout per application
             with st.expander(f"{student_type} — {first_name} {last_name} (ID: {student_id})", expanded=False):
                 cols = st.columns([1.5, 1.5, 2, 2, 2, 1.5])
                 with cols[0]:
@@ -114,7 +109,6 @@ with tab1:
                         matched = subjects_df[subjects_df["subject_title"] == subject_choice]
                         if not matched.empty:
                             subject_id = matched["subject_id"].iloc[0]
-
                     section_options = []
                     if subject_id:
                         section_options = section_df[
@@ -130,46 +124,44 @@ with tab1:
                     enroll_clicked = st.button("Enroll", key=f"enroll_btn_{orig_idx}")
 
                 if enroll_clicked:
-                    # Validation
                     if not subject_choice or not section_choice:
-                        st.warning("Please select both subject and section before enrolling.")
+                        st.warning("Please select both a subject and a section before enrolling.")
                     else:
-                        # Prevent duplicate enrollment in Section sheet if desired
-                        if student_already_enrolled_in_section(student_id, section_choice):
-                            st.error(f"Student {student_id} already enrolled in section '{section_choice}'. Skipping.")
+                        # Prevent duplicate: student already has that section
+                        if student_has_section(student_id, section_choice, students_df):
+                            st.error(f"Student {student_id} already has section '{section_choice}' assigned.")
                         else:
-                            # Update registration record
+                            # Update application record
                             applications_df.at[orig_idx, "subject_title"] = subject_choice
                             applications_df.at[orig_idx, "subject_id"] = subject_id
                             applications_df.at[orig_idx, "section_code"] = section_choice
                             applications_df.at[orig_idx, "date_enrolled"] = datetime.now().strftime("%Y-%m-%d")
-                            applications_df.at[orig_idx, "status"] = True  # mark checkbox as checked
+                            applications_df.at[orig_idx, "status"] = True  # checkbox true
                             applications_df.at[orig_idx, "enrolled_flag"] = True
 
-                            # Optionally: append to Students sheet if missing
-                            if str(student_id) not in students_df["student_id"].astype(str).tolist():
+                            # Update or create student in Students sheet
+                            mask_student = students_df["student_id"].astype(str) == str(student_id)
+                            if students_df[mask_student].empty:
                                 new_student = {
                                     "student_id": student_id,
                                     "first_name": first_name,
                                     "last_name": last_name,
+                                    "section_code": section_choice,
+                                    "subject_id": subject_id,
+                                    "subject_title": subject_choice,
                                     "date_enrolled": datetime.now().strftime("%Y-%m-%d"),
                                 }
                                 students_df.loc[len(students_df)] = new_student
+                            else:
+                                idx_student = students_df[mask_student].index[0]
+                                students_df.at[idx_student, "section_code"] = section_choice
+                                students_df.at[idx_student, "subject_id"] = subject_id
+                                students_df.at[idx_student, "subject_title"] = subject_choice
+                                students_df.at[idx_student, "date_enrolled"] = datetime.now().strftime("%Y-%m-%d")
 
-                            # Optionally: append to Section sheet to reflect enrollment
-                            if not student_already_enrolled_in_section(student_id, section_choice):
-                                new_section_row = {
-                                    "student_id": student_id,
-                                    "section_id": section_choice,  # adapt if you have a separate section_id
-                                    "section_code": section_choice,
-                                    "subject_id": subject_id,
-                                }
-                                section_df.loc[len(section_df)] = new_section_row
-
-                            # Persist changes back to Google Sheets
+                            # Persist changes
                             push_df_to_sheet(applications_df, "Students Registration")
                             push_df_to_sheet(students_df, "Students")
-                            push_df_to_sheet(section_df, "Section")
 
                             st.success(f"Enrolled {first_name} {last_name} in '{subject_choice}' / '{section_choice}'.")
 
@@ -177,21 +169,28 @@ with tab1:
 with tab2:
     st.header("Enrolled Students")
 
-    # Recompute merged view
-    merged_students = section_df.merge(students_df, on="student_id", how="left")
-    final_df = merged_students.merge(subjects_df, on="subject_id", how="left")
+    # Students with assigned section_code
+    enrolled_students = students_df[
+        students_df["section_code"].astype(str).str.strip() != ""
+    ].copy()
 
-    # Only those with a section assigned
-    assigned_df = final_df[
-        final_df["section_code"].notna() & (final_df["section_code"].astype(str).str.strip() != "")
-    ]
+    # Fill missing subject_title from subjects_df if needed
+    if "subject_title" in enrolled_students.columns:
+        missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
+        if missing_mask.any():
+            title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
+            enrolled_students.loc[missing_mask, "subject_title"] = enrolled_students.loc[missing_mask, "subject_id"].map(title_map)
+    else:
+        enrolled_students["subject_title"] = enrolled_students["subject_id"].map(
+            subjects_df.set_index("subject_id")["subject_title"]
+        )
 
-    display_df = assigned_df[[
+    display_df = enrolled_students[[
         "student_id", "first_name", "last_name", "subject_title", "section_code"
-    ]].drop_duplicates()
+    ]].drop_duplicates().reset_index(drop=True)
 
     st.subheader("Current Enrollments")
-    st.dataframe(display_df.reset_index(drop=True))
+    st.dataframe(display_df)
 
     st.download_button(
         "Download Enrolled Students CSV",
@@ -204,30 +203,32 @@ with tab2:
 with tab3:
     st.header("Section List Overview")
 
-    # Build summary: count students per section_code from assigned_df
+    # Compute enrollment counts per section from Students sheet
     section_summary = (
-        assigned_df.groupby("section_code", dropna=False)
-        .agg(
-            enrolled_count=("student_id", "nunique"),
-        )
+        students_df[students_df["section_code"].astype(str).str.strip() != ""]
+        .groupby("section_code", dropna=False)
+        .agg(enrolled_count=("student_id", "nunique"))
         .reset_index()
     )
 
-    # Pull additional metadata from section_df (first occurrence per section_code)
-    def get_meta(section_code, field):
-        row = section_df[section_df["section_code"] == section_code]
+    # Attach metadata from section_df
+    def get_section_meta(code, field):
+        row = section_df[section_df["section_code"] == code]
         return row[field].iloc[0] if not row.empty and field in row.columns else ""
 
-    section_summary["section_day_sched"] = section_summary["section_code"].apply(lambda c: get_meta(c, "section_day_sched"))
-    section_summary["section_start_time"] = section_summary["section_code"].apply(lambda c: get_meta(c, "section_start_time"))
-    section_summary["section_end_time"] = section_summary["section_code"].apply(lambda c: get_meta(c, "section_end_time"))
-    section_summary["batch_id"] = section_summary["section_code"].apply(lambda c: get_meta(c, "batch_id"))
+    section_summary["section_day_sched"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_day_sched"))
+    section_summary["section_start_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_start_time"))
+    section_summary["section_end_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_end_time"))
+    section_summary["batch_id"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "batch_id"))
 
     st.subheader("Sections and Enrollment Counts")
     st.dataframe(section_summary)
 
     st.markdown("### Drill-down: Section Details")
-    selected_section = st.selectbox("Select section to view details", options=section_summary["section_code"].dropna().unique())
+    selected_section = st.selectbox(
+        "Select section to inspect",
+        options=section_summary["section_code"].dropna().unique()
+    )
 
     if selected_section:
         meta = section_summary[section_summary["section_code"] == selected_section].iloc[0]
@@ -238,12 +239,19 @@ with tab3:
             "Enrolled Students": int(meta.get("enrolled_count", 0))
         })
 
-        # List students in that section
-        in_section = assigned_df[assigned_df["section_code"] == selected_section]
-        if not in_section.empty:
+        # Students in that section
+        students_in_section = students_df[students_df["section_code"] == selected_section].copy()
+        if not students_in_section.empty:
+            # Ensure subject_title present
+            if "subject_title" not in students_in_section.columns or students_in_section["subject_title"].isna().any():
+                title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
+                students_in_section["subject_title"] = students_in_section["subject_id"].map(title_map)
+
             st.subheader("Students in this Section")
-            st.dataframe(in_section[[
-                "student_id", "first_name", "last_name", "subject_title"
-            ]].drop_duplicates().reset_index(drop=True))
+            st.dataframe(
+                students_in_section[["student_id", "first_name", "last_name", "subject_title"]]
+                .drop_duplicates()
+                .reset_index(drop=True)
+            )
         else:
-            st.info("No students currently enrolled in this section.")
+            st.info("No students enrolled in this section yet.")
