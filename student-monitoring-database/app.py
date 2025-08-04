@@ -103,8 +103,8 @@ applications_df = load_sheet_df("Students Registration")
 applications_df["enrolled_flag"] = applications_df.get("status", "").apply(normalize_enrolled)
 
 # ---------- DEBUG SIDEBAR ----------
-st.sidebar.subheader("Debug: Students Registration Columns")
-st.sidebar.write(applications_df.columns.tolist())
+#st.sidebar.subheader("Debug: Students Registration Columns")
+#st.sidebar.write(applications_df.columns.tolist())
 
 # ---------- UI TABS ----------
 tab1, tab2, tab3 = st.tabs(
