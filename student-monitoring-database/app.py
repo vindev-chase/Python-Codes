@@ -317,7 +317,7 @@ with tab3:
         meta = section_summary[section_summary["section_code"] == selected_section].iloc[0]
         st.markdown(f"**Section {selected_section}**")
         st.write({
-            "Batch": meta.get("batch_id", ""),
+            #"Batch": meta.get("batch_id", ""),
             "Schedule": f"{meta.get('section_day_sched','')} {meta.get('section_start_time','')} - {meta.get('section_end_time','')}",
             "Enrolled Students": int(meta.get("enrolled_count", 0))
         })
