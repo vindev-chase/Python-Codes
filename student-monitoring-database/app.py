@@ -2,11 +2,39 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
-# ---------- CONFIG / AUTH ----------
+# ---------- PAGE CONFIG ----------
 st.set_page_config(page_title="Enrollment Dashboard", layout="wide")
 
+# ---------- AUTHENTICATION ----------
+def login():
+    st.sidebar.title("Login")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    if st.sidebar.button("Log in"):
+        users = st.secrets.get("users", {})
+        if username in users and check_password_hash(users[username], password):
+            st.session_state["logged_in"] = True
+            st.session_state["username"] = username
+            st.success(f"Logged in as {username}")
+        else:
+            st.sidebar.error("Invalid credentials")
+
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login()
+    st.stop()
+else:
+    st.sidebar.markdown(f"**User:** {st.session_state.get('username')}")
+    if st.sidebar.button("Log out"):
+        st.session_state["logged_in"] = False
+        st.experimental_rerun()
+
+# ---------- AUTH & GOOGLE SHEETS SETUP ----------
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -16,7 +44,7 @@ service_account_info = st.secrets["google_sheets"]
 creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
 client = gspread.authorize(creds)
 
-SPREADSHEET_NAME = "Student Monitoring Database"  # replace with your actual spreadsheet name
+SPREADSHEET_NAME = "Student Monitoring Database"  # <-- replace with actual name or switch to open_by_key
 spreadsheet = client.open(SPREADSHEET_NAME)
 
 # ---------- HELPERS ----------
@@ -58,11 +86,12 @@ def generate_student_id(existing_df: pd.DataFrame, enrollment_year: int, program
 def section_enrollment_count(section_code: str, df_students: pd.DataFrame) -> int:
     return df_students[df_students["section_code"] == section_code]["student_id"].nunique()
 
-def student_has_section(student_id, section_code, df_students):
-    return not df_students[
-        (df_students["student_id"].astype(str) == str(student_id))
-        & (df_students["section_code"] == section_code)
-    ].empty
+# fuzzy getter for variants of age/bracket column names
+def get_fuzzy(app_row, candidates, default=""):
+    for c in candidates:
+        if c in app_row and str(app_row[c]).strip() != "":
+            return app_row[c]
+    return default
 
 # ---------- LOAD DATA ----------
 students_df = load_sheet_df("Students")
@@ -70,8 +99,12 @@ section_df = load_sheet_df("Section")
 subjects_df = load_sheet_df("Subjects")
 applications_df = load_sheet_df("Students Registration")
 
-# Normalize status/checkbox
+# Normalize enrollment checkbox/status
 applications_df["enrolled_flag"] = applications_df.get("status", "").apply(normalize_enrolled)
+
+# ---------- DEBUG SIDEBAR ----------
+st.sidebar.subheader("Debug: Students Registration Columns")
+st.sidebar.write(applications_df.columns.tolist())
 
 # ---------- UI TABS ----------
 tab1, tab2, tab3 = st.tabs(
@@ -83,17 +116,15 @@ with tab1:
     st.header("Student Application List")
     st.markdown(
         "Pending applications appear below. Select subject and section (capacity shown), then click Enroll. "
-        "Max per section is **6**. Age and preferred starting bracket are included."
+        "Max per section is **6**. Age and preferred starting bracket are shown."
     )
 
-    # Sanity check column presence
-    missing_cols = []
-    for col in ["student_age", "preferred_starting_bracket"]:
-        if col not in applications_df.columns:
-            missing_cols.append(col)
-    if missing_cols:
-        st.warning(f"The following expected column(s) are missing from Students Registration: {', '.join(missing_cols)}")
-    
+    # Check for expected fields (will not break if missing)
+    if "student_age" not in applications_df.columns and "age" not in applications_df.columns:
+        st.sidebar.warning("Neither 'student_age' nor 'age' column found in Students Registration.")
+    if "preferred_starting_bracket" not in applications_df.columns:
+        st.sidebar.warning("'preferred_starting_bracket' column not found in Students Registration.")
+
     # Filter pending and non-empty
     pending_apps = applications_df[
         (~applications_df["enrolled_flag"])
@@ -112,13 +143,13 @@ with tab1:
             student_nickname = app.get("student_nickname", "")
             student_contact = app.get("student_contact", "")
             student_birthday = app.get("student_birthday", "")
-            student_age = app.get("student_age", "(no age)")
-            preferred_bracket = app.get("preferred_starting_bracket", "(no bracket)")
+            student_age = get_fuzzy(app, ["student_age", "age"], "(no age)")
             emergency_contact_person = app.get("emergency_contact_person", "")
             emergency_contact_number = app.get("emergency_contact_number", "")
             emergency_contact_relationship = app.get("emergency_contact_relationship", "")
+            preferred_bracket = get_fuzzy(app, ["preferred_starting_bracket", "preferred starting bracket", "preferred_bracket"], "(no bracket)")
 
-            with st.expander(f"{student_type} — {first_name} {last_name} {student_age} {preferred_bracket}", expanded=False):
+            with st.expander(f"{student_type} — {first_name} {last_name}", expanded=False):
                 cols = st.columns([1.2, 1.2, 1.5, 1.2, 1.8, 1.8, 2, 1.5])
                 with cols[0]:
                     st.markdown("**Type**")
@@ -163,7 +194,7 @@ with tab1:
                     st.markdown("**Enroll**")
                     enroll_clicked = st.button("Enroll", key=f"enroll_btn_{orig_idx}")
 
-                # Show capacity
+                # Show capacity info
                 if section_choice:
                     count = section_enrollment_count(section_choice, students_df)
                     st.markdown(f"**Section {section_choice}: {count}/6 enrolled**")
@@ -206,7 +237,7 @@ with tab1:
                     # Append to Students
                     students_df.loc[len(students_df)] = student_row
 
-                    # Update application
+                    # Update application row
                     applications_df.at[orig_idx, "student_id"] = new_student_id
                     applications_df.at[orig_idx, "subject_title"] = subject_choice
                     applications_df.at[orig_idx, "subject_id"] = subject_id
@@ -215,12 +246,11 @@ with tab1:
                     applications_df.at[orig_idx, "status"] = True
                     applications_df.at[orig_idx, "enrolled_flag"] = True
 
-                    # Persist
+                    # Persist changes
                     push_df_to_sheet(applications_df, "Students Registration")
                     push_df_to_sheet(students_df, "Students")
 
                     st.success(f"Enrolled {first_name} {last_name} as {new_student_id} into section '{section_choice}'.")
-
 
 # ---------- TAB 2: Enrolled Students ----------
 with tab2:
@@ -230,7 +260,6 @@ with tab2:
         students_df["section_code"].astype(str).str.strip() != ""
     ].copy()
 
-    # Ensure subject_title is filled if missing
     if "subject_title" in enrolled_students.columns:
         missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
         if missing_mask.any():
