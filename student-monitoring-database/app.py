@@ -7,8 +7,10 @@ st.title("Student Subject & Section Viewer")
 
 # 🔐 Authenticate to Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("student-monitoring-database-334212d8ac2b.json", scope)
+creds_dict = dict(st.secrets["google_sheets"])  # secrets section name
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
+
 
 # 📊 Load Google Sheets by name or key
 spreadsheet = client.open("Student Monitoring Database")
