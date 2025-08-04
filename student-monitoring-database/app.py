@@ -74,7 +74,7 @@ with tab1:
     # Filter out blank/placeholder rows: require student_id and first_name non-empty
     pending_apps = applications_df[
         (~applications_df["enrolled_flag"])
-        & applications_df["student_id"].astype(str).str.strip().astype(bool)
+        #& applications_df["student_id"].astype(str).str.strip().astype(bool)
         & applications_df["first_name"].astype(str).str.strip().astype(bool)
     ].reset_index()
 
