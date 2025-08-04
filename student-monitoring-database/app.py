@@ -86,6 +86,15 @@ with tab1:
         "Max per section is **6**. Age and preferred starting bracket are included."
     )
 
+    # Sanity check column presence
+    missing_cols = []
+    for col in ["student_age", "preferred_starting_bracket"]:
+        if col not in applications_df.columns:
+            missing_cols.append(col)
+    if missing_cols:
+        st.warning(f"The following expected column(s) are missing from Students Registration: {', '.join(missing_cols)}")
+
+    # Filter pending and non-empty
     pending_apps = applications_df[
         (~applications_df["enrolled_flag"])
         & applications_df["first_name"].astype(str).str.strip().astype(bool)
@@ -103,14 +112,14 @@ with tab1:
             student_nickname = app.get("student_nickname", "")
             student_contact = app.get("student_contact", "")
             student_birthday = app.get("student_birthday", "")
-            student_age = app.get("student_age", "")
+            student_age = app.get("student_age", "(no age)")
+            preferred_bracket = app.get("preferred_starting_bracket", "(no bracket)")
             emergency_contact_person = app.get("emergency_contact_person", "")
             emergency_contact_number = app.get("emergency_contact_number", "")
             emergency_contact_relationship = app.get("emergency_contact_relationship", "")
-            preferred_bracket = app.get("preferred_starting_bracket", "")
 
             with st.expander(f"{student_type} — {first_name} {last_name}", expanded=False):
-                cols = st.columns([1.2, 1.2, 1.5, 1.5, 2, 2, 1.5])
+                cols = st.columns([1.2, 1.2, 1.5, 1.2, 1.8, 1.8, 2, 1.5])
                 with cols[0]:
                     st.markdown("**Type**")
                     st.write(student_type)
@@ -150,15 +159,17 @@ with tab1:
                         options=[""] + section_options if section_options else [""],
                         key=f"section_select_{orig_idx}"
                     )
+                with cols[7]:
+                    st.markdown("**Enroll**")
+                    enroll_clicked = st.button("Enroll", key=f"enroll_btn_{orig_idx}")
 
-                # Show capacity info if a section is picked
+                # Show capacity
                 if section_choice:
                     count = section_enrollment_count(section_choice, students_df)
                     st.markdown(f"**Section {section_choice}: {count}/6 enrolled**")
                     if count >= 6:
                         st.error(f"Section {section_choice} is full. Cannot enroll more.")
 
-                enroll_clicked = st.button("Enroll", key=f"enroll_btn_{orig_idx}")
                 if enroll_clicked:
                     if not subject_choice or not section_choice:
                         st.warning("Both subject and section must be selected.")
@@ -173,7 +184,7 @@ with tab1:
                     year = now.year
                     new_student_id = generate_student_id(students_df, year, program_code="R")
 
-                    # Build new student record (copy fields)
+                    # Build student record
                     student_row = {
                         "student_id": new_student_id,
                         "first_name": first_name,
@@ -192,10 +203,10 @@ with tab1:
                         "date_enrolled": now.strftime("%Y-%m-%d"),
                     }
 
-                    # Append student
+                    # Append to Students
                     students_df.loc[len(students_df)] = student_row
 
-                    # Update application row
+                    # Update application
                     applications_df.at[orig_idx, "student_id"] = new_student_id
                     applications_df.at[orig_idx, "subject_title"] = subject_choice
                     applications_df.at[orig_idx, "subject_id"] = subject_id
@@ -204,11 +215,12 @@ with tab1:
                     applications_df.at[orig_idx, "status"] = True
                     applications_df.at[orig_idx, "enrolled_flag"] = True
 
-                    # Persist changes
+                    # Persist
                     push_df_to_sheet(applications_df, "Students Registration")
                     push_df_to_sheet(students_df, "Students")
 
                     st.success(f"Enrolled {first_name} {last_name} as {new_student_id} into section '{section_choice}'.")
+
 
 # ---------- TAB 2: Enrolled Students ----------
 with tab2:
