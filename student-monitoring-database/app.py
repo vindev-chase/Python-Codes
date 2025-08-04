@@ -66,83 +66,79 @@ tab1, tab2, tab3 = st.tabs(["Student Applications", "Enrolled Students", "Sectio
 with tab1:
     st.header("Student Application List")
 
-    # Show raw applications
-    st.subheader("Pending Applications")
-    # Optionally filter out already enrolled if you track status
-    # You might have a column like 'enrolled' or 'status'
-    applications_df["selected"] = False  # placeholder for checkbox tracking
+    # Only show applications not yet enrolled
+    pending_apps = applications_df[applications_df.get("status", "").str.lower() != "enrolled"].copy()
+    if pending_apps.empty:
+        st.info("No pending applications.")
+    else:
+        st.subheader("Pending Applications")
 
-    # Display and handle enrollment per row
-    enrollments = []
+        for idx, app in pending_apps.reset_index().iterrows():
+            # Use the original index in applications_df to update later
+            orig_idx = app["index"] if "index" in app else idx
 
-    for idx, app in applications_df.iterrows():
-        col1, col2, col3 = st.columns([1, 2, 2])
-        with col1:
-            enroll_checkbox = st.checkbox(f"Enroll {app.get('first_name','')} {app.get('last_name','')}", key=f"enroll_{idx}")
-        with col2:
-            subject_choice = st.selectbox(
-                "Subject",
-                options=subjects_df["subject_title"].fillna("").unique(),
-                key=f"subject_{idx}"
-            )
-        with col3:
-            # derive subject_id from title
-            selected_subject_row = subjects_df[subjects_df["subject_title"] == subject_choice]
-            subject_id = selected_subject_row["subject_id"].iloc[0] if not selected_subject_row.empty else ""
-            # Filter available sections for that subject
-            valid_sections = section_df[section_df["subject_id"] == subject_id]["section_code"].unique().tolist()
-            if not valid_sections:
-                valid_sections = ["(no section for this subject)"]
-            section_choice = st.selectbox("Section", options=valid_sections, key=f"section_{idx}")
+            st.markdown("---")
+            cols = st.columns([1, 2, 2, 2, 2])  # adjust widths as needed
 
-        if enroll_checkbox:
-            # Collect data for processing
-            enrollments.append({
-                "application_index": idx,
-                "student_id": app.get("student_id"),
-                "first_name": app.get("first_name"),
-                "last_name": app.get("last_name"),
-                "subject_title": subject_choice,
-                "subject_id": subject_id,
-                "section_code": section_choice,
-                # you can map or lookup section_id if needed
-                "date_enrolled": datetime.now().strftime("%Y-%m-%d")
-            })
+            with cols[0]:
+                st.markdown(f"**{app.get('student_type','')}**")
+            with cols[1]:
+                st.markdown(f"{app.get('first_name','')}")
+            with cols[2]:
+                st.markdown(f"{app.get('last_name','')}")
+            with cols[3]:
+                # Subject dropdown: show titles
+                subject_choice = st.selectbox(
+                    "Subject",
+                    options=[""] + subjects_df["subject_title"].dropna().unique().tolist(),
+                    key=f"subject_select_{orig_idx}"
+                )
+            with cols[4]:
+                # Determine subject_id from title
+                subject_id = ""
+                if subject_choice:
+                    matched = subjects_df[subjects_df["subject_title"] == subject_choice]
+                    if not matched.empty:
+                        subject_id = matched["subject_id"].iloc[0]
 
-    if enrollments:
-        if st.button("Confirm Enrollment(s)"):
-            for e in enrollments:
-                # 1. Append to Students sheet if not already there
-                if e["student_id"] not in students_df["student_id"].astype(str).tolist():
-                    new_student_row = {
-                        "student_id": e["student_id"],
-                        "first_name": e["first_name"],
-                        "last_name": e["last_name"],
-                        # fill other required student fields minimally
-                        "date_enrolled": e["date_enrolled"]
-                    }
-                    students_df = pd.concat([students_df, pd.DataFrame([new_student_row])], ignore_index=True)
+                # Section dropdown filtered by subject_id
+                section_options = []
+                if subject_id:
+                    section_options = section_df[section_df["subject_id"] == subject_id]["section_code"].dropna().unique().tolist()
+                section_choice = st.selectbox(
+                    "Section",
+                    options=[""] + section_options if section_options else [""],
+                    key=f"section_select_{orig_idx}"
+                )
 
-                # 2. Append to Section sheet: need section_id (if you have mapping)
-                # If your subjects_df has section_id (ambiguous in schema), otherwise use section_code as is
-                new_section_entry = {
-                    "student_id": e["student_id"],
-                    "section_id": e.get("section_code"),  # or look up true section_id
-                    "section_code": e.get("section_code"),
-                    "subject_id": e.get("subject_id"),
-                    # you can fill other fields like schedule, batch_id if derivable
-                }
-                section_df = pd.concat([section_df, pd.DataFrame([new_section_entry])], ignore_index=True)
+            # Enroll button (must be outside the column group to avoid layout issues)
+            enroll_key = f"enroll_btn_{orig_idx}"
+            if st.button("Enroll", key=enroll_key):
+                # Validation
+                if not subject_choice or not section_choice:
+                    st.warning("You must select both a subject and a section before enrolling.")
+                else:
+                    # Update the corresponding row in applications_df
+                    # Find the row by matching a unique identifier (assumes 'student_id' exists)
+                    mask = applications_df["student_id"].astype(str) == str(app.get("student_id"))
+                    # If multiple matches, further narrow down by first+last name if needed
+                    # Here we pick the first unmatched pending one
+                    target_indices = applications_df[mask & (applications_df.get("status", "").str.lower() != "enrolled")]
+                    if target_indices.empty:
+                        st.error("Could not find the application row to update.")
+                    else:
+                        target_idx = target_indices.index[0]
+                        applications_df.at[target_idx, "subject_id"] = subject_id
+                        applications_df.at[target_idx, "subject_title"] = subject_choice
+                        applications_df.at[target_idx, "section_code"] = section_choice
+                        applications_df.at[target_idx, "status"] = "enrolled"
+                        applications_df.at[target_idx, "date_enrolled"] = datetime.now().strftime("%Y-%m-%d")
 
-                # Optionally mark application as enrolled: add a status column if not present
-                applications_df.loc[e["application_index"], "status"] = "enrolled"
+                        # Push updated applications back to the sheet
+                        push_df_to_sheet(applications_df, "Students Registration")
 
-            # Push updates back
-            push_df_to_sheet(students_df, "Students")
-            push_df_to_sheet(section_df, "Section")
-            push_df_to_sheet(applications_df, "Students Registration")
+                        st.success(f"Enrolled {app.get('first_name','')} {app.get('last_name','')} in {subject_choice} / {section_choice}")
 
-            st.success(f"Enrolled {len(enrollments)} student(s). Reload to refresh data.")
 
 
 with tab2:
