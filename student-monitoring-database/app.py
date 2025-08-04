@@ -94,6 +94,10 @@ with tab1:
     if missing_cols:
         st.warning(f"The following expected column(s) are missing from Students Registration: {', '.join(missing_cols)}")
 
+    #debug not showing age
+    st.sidebar.subheader("Debug: Application Sheet Columns")
+    st.sidebar.write(applications_df.columns.tolist())
+    
     # Filter pending and non-empty
     pending_apps = applications_df[
         (~applications_df["enrolled_flag"])
