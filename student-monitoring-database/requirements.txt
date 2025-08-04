@@ -2,3 +2,4 @@ streamlit>=1.25.0
 pandas>=2.0
 gspread>=5.9.0
 google-auth>=2.20.0
+werkzeug>=2.1.0

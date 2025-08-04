@@ -118,7 +118,7 @@ with tab1:
             emergency_contact_number = app.get("emergency_contact_number", "")
             emergency_contact_relationship = app.get("emergency_contact_relationship", "")
 
-            with st.expander(f"{student_type} — {first_name} {last_name}", expanded=False):
+            with st.expander(f"{student_type} — {first_name} {last_name} {student_age} {preferred_bracket}", expanded=False):
                 cols = st.columns([1.2, 1.2, 1.5, 1.2, 1.8, 1.8, 2, 1.5])
                 with cols[0]:
                     st.markdown("**Type**")
