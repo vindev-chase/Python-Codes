@@ -50,8 +50,13 @@ spreadsheet = client.open(SPREADSHEET_NAME)
 # ---------- HELPERS ----------
 def load_sheet_df(sheet_name: str) -> pd.DataFrame:
     df = pd.DataFrame(spreadsheet.worksheet(sheet_name).get_all_records())
-    df.columns = df.columns.str.strip().str.lower()
-    return df
+    if df is not None and not df.empty:
+        st.dataframe(df)
+        df.columns = df.columns.str.strip().str.lower()
+        return df
+    else:
+        st.warning("No students enrolled yet.")
+    
 
 def push_df_to_sheet(df: pd.DataFrame, sheet_name: str):
     ws = spreadsheet.worksheet(sheet_name)
