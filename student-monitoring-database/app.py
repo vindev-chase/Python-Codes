@@ -283,6 +283,7 @@ with tab2:
             file_name="enrolled_students.csv",
             mime="text/csv"
         )
+    #No Enrolled students handling
     except AttributeError:
         st.subheader("No Enrolled Students")
 
