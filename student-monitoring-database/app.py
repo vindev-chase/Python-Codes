@@ -259,35 +259,36 @@ with tab1:
 # ---------- TAB 2: Enrolled Students ----------
 with tab2:
     st.header("Enrolled Students")
-    
-    enrolled_students = students_df[
-        students_df["section_code"].astype(str).str.strip() != ""
-    ].copy()
-    if "subject_title" in enrolled_students.columns:
-        missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
-        if missing_mask.any():
-            title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
-            enrolled_students.loc[missing_mask, "subject_title"] = enrolled_students.loc[missing_mask, "subject_id"].map(title_map)
-    else:
-        enrolled_students["subject_title"] = enrolled_students["subject_id"].map(
-            subjects_df.set_index("subject_id")["subject_title"]
+    try:
+        enrolled_students = students_df[
+            students_df["section_code"].astype(str).str.strip() != ""
+        ].copy()
+        if "subject_title" in enrolled_students.columns:
+            missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
+            if missing_mask.any():
+                title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
+                enrolled_students.loc[missing_mask, "subject_title"] = enrolled_students.loc[missing_mask, "subject_id"].map(title_map)
+        else:
+            enrolled_students["subject_title"] = enrolled_students["subject_id"].map(
+                subjects_df.set_index("subject_id")["subject_title"]
+            )
+
+        display_df = enrolled_students[[
+            "student_id", "first_name", "last_name", "subject_title", "section_code"
+        ]].drop_duplicates().reset_index(drop=True)
+
+        st.subheader("Current Enrollments")
+        st.dataframe(display_df)
+
+        st.download_button(
+            "Download Enrolled Students CSV",
+            display_df.to_csv(index=False).encode("utf-8"),
+            file_name="enrolled_students.csv",
+            mime="text/csv"
         )
-
-    display_df = enrolled_students[[
-        "student_id", "first_name", "last_name", "subject_title", "section_code"
-    ]].drop_duplicates().reset_index(drop=True)
-
-    st.subheader("Current Enrollments")
-    st.dataframe(display_df)
-
-    st.download_button(
-        "Download Enrolled Students CSV",
-        display_df.to_csv(index=False).encode("utf-8"),
-        file_name="enrolled_students.csv",
-        mime="text/csv"
-    )
 #No Enrolled students handling
-
+    except TypeError:
+        st.subheader("No enrolled students yet")
 # ---------- TAB 3: Section List ----------
 with tab3:
     st.header("Section List Overview")
