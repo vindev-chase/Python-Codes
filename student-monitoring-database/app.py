@@ -199,11 +199,14 @@ with tab1:
                     enroll_clicked = st.button("Enroll", key=f"enroll_btn_{orig_idx}")
 
                 # Show capacity info
-                if section_choice:
-                    count = section_enrollment_count(section_choice, students_df)
-                    st.markdown(f"**Section {section_choice}: {count}/6 enrolled**")
-                    if count >= 6:
-                        st.error(f"Section {section_choice} is full. Cannot enroll more.")
+                try:
+                    if section_choice:
+                        count = section_enrollment_count(section_choice, students_df)
+                        st.markdown(f"**Section {section_choice}: {count}/6 enrolled**")
+                        if count >= 6:
+                            st.error(f"Section {section_choice} is full. Cannot enroll more.")
+                except TypeError:
+                    print("")
 
                 if enroll_clicked:
                     if not subject_choice or not section_choice:
