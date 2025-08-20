@@ -50,12 +50,11 @@ spreadsheet = client.open(SPREADSHEET_NAME)
 # ---------- HELPERS ----------
 def load_sheet_df(sheet_name: str) -> pd.DataFrame:
     df = pd.DataFrame(spreadsheet.worksheet(sheet_name).get_all_records())
-    if df is not None and not df.empty:
-        st.dataframe(df)
+    try:
         df.columns = df.columns.str.strip().str.lower()
         return df
-    else:
-        st.warning("No students enrolled yet.")
+    except AttributeError:
+        st.warning("No enrolled students yet")
     
 
 def push_df_to_sheet(df: pd.DataFrame, sheet_name: str):
@@ -264,32 +263,29 @@ with tab2:
     enrolled_students = students_df[
         students_df["section_code"].astype(str).str.strip() != ""
     ].copy()
-    if(st.session_state.enrolled_students == None):
-        st.subheader("No students enrolled")
+    if "subject_title" in enrolled_students.columns:
+        missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
+        if missing_mask.any():
+            title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
+            enrolled_students.loc[missing_mask, "subject_title"] = enrolled_students.loc[missing_mask, "subject_id"].map(title_map)
     else:
-        if "subject_title" in enrolled_students.columns:
-            missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
-            if missing_mask.any():
-                title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
-                enrolled_students.loc[missing_mask, "subject_title"] = enrolled_students.loc[missing_mask, "subject_id"].map(title_map)
-        else:
-            enrolled_students["subject_title"] = enrolled_students["subject_id"].map(
-                subjects_df.set_index("subject_id")["subject_title"]
-            )
-
-        display_df = enrolled_students[[
-            "student_id", "first_name", "last_name", "subject_title", "section_code"
-        ]].drop_duplicates().reset_index(drop=True)
-
-        st.subheader("Current Enrollments")
-        st.dataframe(display_df)
-
-        st.download_button(
-            "Download Enrolled Students CSV",
-            display_df.to_csv(index=False).encode("utf-8"),
-            file_name="enrolled_students.csv",
-            mime="text/csv"
+        enrolled_students["subject_title"] = enrolled_students["subject_id"].map(
+            subjects_df.set_index("subject_id")["subject_title"]
         )
+
+    display_df = enrolled_students[[
+        "student_id", "first_name", "last_name", "subject_title", "section_code"
+    ]].drop_duplicates().reset_index(drop=True)
+
+    st.subheader("Current Enrollments")
+    st.dataframe(display_df)
+
+    st.download_button(
+        "Download Enrolled Students CSV",
+        display_df.to_csv(index=False).encode("utf-8"),
+        file_name="enrolled_students.csv",
+        mime="text/csv"
+    )
 #No Enrolled students handling
 
 # ---------- TAB 3: Section List ----------
