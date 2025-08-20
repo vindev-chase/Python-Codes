@@ -255,11 +255,13 @@ with tab1:
 # ---------- TAB 2: Enrolled Students ----------
 with tab2:
     st.header("Enrolled Students")
-    try:
-        enrolled_students = students_df[
-            students_df["section_code"].astype(str).str.strip() != ""
-        ].copy()
-
+    
+    enrolled_students = students_df[
+        students_df["section_code"].astype(str).str.strip() != ""
+    ].copy()
+    if(st.session_state.enrolled_students == None):
+        st.subheader("No students enrolled")
+    else:
         if "subject_title" in enrolled_students.columns:
             missing_mask = enrolled_students["subject_title"].isna() | (enrolled_students["subject_title"] == "")
             if missing_mask.any():
@@ -283,9 +285,7 @@ with tab2:
             file_name="enrolled_students.csv",
             mime="text/csv"
         )
-    #No Enrolled students handling
-    except AttributeError:
-        st.subheader("No Enrolled Students")
+#No Enrolled students handling
 
 # ---------- TAB 3: Section List ----------
 with tab3:
