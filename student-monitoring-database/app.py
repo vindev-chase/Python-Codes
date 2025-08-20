@@ -292,52 +292,54 @@ with tab2:
 # ---------- TAB 3: Section List ----------
 with tab3:
     st.header("Section List Overview")
+    try:
+        section_summary = (
+            students_df[students_df["section_code"].astype(str).str.strip() != ""]
+            .groupby("section_code", dropna=False)
+            .agg(enrolled_count=("student_id", "nunique"))
+            .reset_index()
+        )
 
-    section_summary = (
-        students_df[students_df["section_code"].astype(str).str.strip() != ""]
-        .groupby("section_code", dropna=False)
-        .agg(enrolled_count=("student_id", "nunique"))
-        .reset_index()
-    )
+        def get_section_meta(code, field):
+            row = section_df[section_df["section_code"] == code]
+            return row[field].iloc[0] if not row.empty and field in row.columns else ""
 
-    def get_section_meta(code, field):
-        row = section_df[section_df["section_code"] == code]
-        return row[field].iloc[0] if not row.empty and field in row.columns else ""
+        section_summary["section_day_sched"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_day_sched"))
+        section_summary["section_start_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_start_time"))
+        section_summary["section_end_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_end_time"))
+        #section_summary["batch_id"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "batch_id"))
 
-    section_summary["section_day_sched"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_day_sched"))
-    section_summary["section_start_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_start_time"))
-    section_summary["section_end_time"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "section_end_time"))
-    #section_summary["batch_id"] = section_summary["section_code"].apply(lambda c: get_section_meta(c, "batch_id"))
+        st.subheader("Sections and Enrollment Counts")
+        st.dataframe(section_summary)
 
-    st.subheader("Sections and Enrollment Counts")
-    st.dataframe(section_summary)
+        st.markdown("### Drill-down: Section Details")
+        selected_section = st.selectbox(
+            "Select section to inspect",
+            options=section_summary["section_code"].dropna().unique()
+        )
 
-    st.markdown("### Drill-down: Section Details")
-    selected_section = st.selectbox(
-        "Select section to inspect",
-        options=section_summary["section_code"].dropna().unique()
-    )
+        if selected_section:
+            meta = section_summary[section_summary["section_code"] == selected_section].iloc[0]
+            st.markdown(f"**Section {selected_section}**")
+            st.write({
+                #"Batch": int(meta.get("batch_id", "")),
+                "Schedule": f"{meta.get('section_day_sched','')} {meta.get('section_start_time','')} - {meta.get('section_end_time','')}",
+                "Enrolled Students": int(meta.get("enrolled_count", 0))
+            })
 
-    if selected_section:
-        meta = section_summary[section_summary["section_code"] == selected_section].iloc[0]
-        st.markdown(f"**Section {selected_section}**")
-        st.write({
-            #"Batch": int(meta.get("batch_id", "")),
-            "Schedule": f"{meta.get('section_day_sched','')} {meta.get('section_start_time','')} - {meta.get('section_end_time','')}",
-            "Enrolled Students": int(meta.get("enrolled_count", 0))
-        })
+            students_in_section = students_df[students_df["section_code"] == selected_section].copy()
+            if not students_in_section.empty:
+                if "subject_title" not in students_in_section.columns or students_in_section["subject_title"].isna().any():
+                    title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
+                    students_in_section["subject_title"] = students_in_section["subject_id"].map(title_map)
 
-        students_in_section = students_df[students_df["section_code"] == selected_section].copy()
-        if not students_in_section.empty:
-            if "subject_title" not in students_in_section.columns or students_in_section["subject_title"].isna().any():
-                title_map = subjects_df.set_index("subject_id")["subject_title"].to_dict()
-                students_in_section["subject_title"] = students_in_section["subject_id"].map(title_map)
-
-            st.subheader("Students in this Section")
-            st.dataframe(
-                students_in_section[["student_id", "first_name", "last_name", "subject_title"]]
-                .drop_duplicates()
-                .reset_index(drop=True)
-            )
-        else:
-            st.info("No students enrolled in this section yet.")
+                st.subheader("Students in this Section")
+                st.dataframe(
+                    students_in_section[["student_id", "first_name", "last_name", "subject_title"]]
+                    .drop_duplicates()
+                    .reset_index(drop=True)
+                )
+            else:
+                st.info("No students enrolled in this section yet.")
+    except TypeError:
+        st.subheader("No enrolled students yet")
