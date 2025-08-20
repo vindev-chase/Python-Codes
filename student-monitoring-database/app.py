@@ -19,8 +19,8 @@ def login():
             st.session_state["logged_in"] = True
             st.session_state["username"] = username
             st.success(f"Logged in as {username}")
-        # else:
-        #     st.sidebar.error("Invalid credentials")
+        else:
+            st.sidebar.error("Invalid credentials")
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -54,7 +54,7 @@ def load_sheet_df(sheet_name: str) -> pd.DataFrame:
         df.columns = df.columns.str.strip().str.lower()
         return df
     except AttributeError:
-        st.warning("No enrolled students yet")
+        print("")
     
 
 def push_df_to_sheet(df: pd.DataFrame, sheet_name: str):
