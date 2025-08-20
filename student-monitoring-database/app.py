@@ -19,8 +19,8 @@ def login():
             st.session_state["logged_in"] = True
             st.session_state["username"] = username
             st.success(f"Logged in as {username}")
-        else:
-            st.sidebar.error("Invalid credentials")
+        # else:
+        #     st.sidebar.error("Invalid credentials")
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -217,7 +217,7 @@ with tab1:
                     # Generate student ID
                     now = datetime.now()
                     year = now.year
-                    new_student_id = generate_student_id(students_df, year, program_code="R")
+                    new_student_id = generate_student_id(students_df, year, program_code="T")
 
                     # Build student record
                     student_row = {
